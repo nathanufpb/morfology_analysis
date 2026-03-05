@@ -56,6 +56,7 @@ class DeltaReader:
         self.num_characters: int = 0
         self.num_taxa: int = 0
         self._char_index: Dict[int, Character] = {}
+        self._ordered_char_ids: set = set()  # populated by _read_specs
 
     # ------------------------------------------------------------------
     # Public API
@@ -115,6 +116,34 @@ class DeltaReader:
         """Normalise whitespace and remove trailing/leading blanks."""
         return " ".join(text.split())
 
+    @staticmethod
+    def _parse_ordered_ids(text: str) -> set:
+        """Extract character IDs marked as ordered from a *CHARACTER TYPES block.
+
+        Supports both the canonical ``OM`` (Ordered Multistate) token and the
+        legacy ``RU`` token used by some older DELTA tools.
+
+        Args:
+            text: Raw (comment-stripped) text to search within.
+
+        Returns:
+            Set of 1-based character IDs that are ordered.
+        """
+        ordered: set = set()
+        types_match = re.search(
+            r"\*CHARACTER\s+TYPES\s*(.*?)(?=\*|\Z)", text, re.IGNORECASE | re.DOTALL
+        )
+        if not types_match:
+            return ordered
+        for m in re.finditer(
+            r"(?:OM|RU)\s+([\d,/\s]+)", types_match.group(1), re.IGNORECASE
+        ):
+            for part in re.split(r"[,\s]+", m.group(1)):
+                part = part.strip()
+                if part.isdigit():
+                    ordered.add(int(part))
+        return ordered
+
     # ------------------------------------------------------------------
     # specs
     # ------------------------------------------------------------------
@@ -135,10 +164,13 @@ class DeltaReader:
         m = re.search(r"\*MAXIMUM\s+NUMBER\s+OF\s+ITEMS\s+(\d+)", text, re.IGNORECASE)
         if m:
             self.num_taxa = int(m.group(1))
+        # *CHARACTER TYPES OM/RU <ids>  — ordered multistate characters
+        self._ordered_char_ids = self._parse_ordered_ids(text)
         logger.debug(
-            "specs: num_characters=%d, num_taxa=%d",
+            "specs: num_characters=%d, num_taxa=%d, ordered=%s",
             self.num_characters,
             self.num_taxa,
+            self._ordered_char_ids,
         )
 
     # ------------------------------------------------------------------
@@ -166,18 +198,12 @@ class DeltaReader:
         # Split on character markers like  #1.  or  #1/
         # DELTA uses  #<number>.  to start character definitions.
         char_blocks = re.split(r"(?=#\d+\.)", text)
-        ordered_chars: set = set()
 
-        # Check for ordered characters directive
-        ord_match = re.search(
-            r"\*CHARACTER\s+TYPES\s*(.*?)(?=\*|\Z)", text, re.IGNORECASE | re.DOTALL
-        )
-        if ord_match:
-            for m in re.finditer(r"RU\s+([\d,/ ]+)", ord_match.group(1)):
-                for part in re.split(r"[,\s]+", m.group(1)):
-                    part = part.strip()
-                    if part.isdigit():
-                        ordered_chars.add(int(part))
+        # Ordered character IDs come from *CHARACTER TYPES in specs (parsed
+        # during _read_specs) or, as a fallback, from the characters file itself.
+        ordered_chars: set = self._ordered_char_ids.copy()
+        if not ordered_chars:
+            ordered_chars = self._parse_ordered_ids(text)
 
         for block in char_blocks:
             block = block.strip()
