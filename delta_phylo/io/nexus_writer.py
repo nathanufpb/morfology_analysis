@@ -28,21 +28,27 @@ class NexusWriter:
         self.matrix = matrix
         self.encoder = MatrixEncoder(matrix)
 
-    def write(self, filepath: str | Path, interleave: bool = False) -> None:
+    def write(self, filepath: str | Path, interleave: bool = False, block_width: int = 60) -> None:
         """Write the NEXUS file.
 
         Args:
             filepath: Output file path.
-            interleave: If True, write interleaved DATA block (not yet
-                implemented; always writes sequential format).
+            interleave: If True, write the MATRIX in interleaved blocks.
+                Each block contains *block_width* characters per line.
+            block_width: Number of characters per taxon per interleaved block
+                (default 60). Ignored when *interleave* is False.
         """
         filepath = Path(filepath)
-        content = self._build_nexus()
+        content = self._build_nexus(interleave=interleave, block_width=block_width)
         filepath.write_text(content, encoding="utf-8")
         logger.info("NEXUS file written to %s", filepath)
 
-    def _build_nexus(self) -> str:
+    def _build_nexus(self, interleave: bool = False, block_width: int = 60) -> str:
         """Build the NEXUS string.
+
+        Args:
+            interleave: Whether to write the MATRIX in interleaved format.
+            block_width: Characters per taxon per interleaved block.
 
         Returns:
             NEXUS-formatted string.
@@ -76,16 +82,30 @@ class NexusWriter:
         lines.append("")
         lines.append("BEGIN CHARACTERS;")
         lines.append(f"\tDIMENSIONS NCHAR={n_chars};")
+        interleave_flag = " INTERLEAVE=YES" if interleave else ""
         lines.append(
-            f"\tFORMAT DATATYPE=STANDARD MISSING=? GAP=- SYMBOLS=\"{symbols}\";"
+            f"\tFORMAT DATATYPE=STANDARD MISSING=? GAP=- SYMBOLS=\"{symbols}\"{interleave_flag};"
         )
         lines.append("\tMATRIX")
         max_name_len = max(len(n) for n in taxa_names)
-        for name in taxa_names:
-            symbol_str = self.encoder.symbol_string(name)
-            safe_name = f"'{name}'" if " " in name else name
-            padded = safe_name.ljust(max_name_len + 2)
-            lines.append(f"\t\t{padded}  {symbol_str}")
+        if interleave:
+            # Write MATRIX in blocks of block_width characters
+            for block_start in range(0, n_chars, block_width):
+                block_end = min(block_start + block_width, n_chars)
+                lines.append(f"\t\t[ characters {block_start + 1}-{block_end} ]")
+                for name in taxa_names:
+                    symbol_str = self.encoder.symbol_string(name)
+                    block_str = symbol_str[block_start:block_end]
+                    safe_name = f"'{name}'" if " " in name else name
+                    padded = safe_name.ljust(max_name_len + 2)
+                    lines.append(f"\t\t{padded}  {block_str}")
+                lines.append("")   # blank line between blocks
+        else:
+            for name in taxa_names:
+                symbol_str = self.encoder.symbol_string(name)
+                safe_name = f"'{name}'" if " " in name else name
+                padded = safe_name.ljust(max_name_len + 2)
+                lines.append(f"\t\t{padded}  {symbol_str}")
         lines.append("\t;")
         lines.append("END;")
         lines.append("")
