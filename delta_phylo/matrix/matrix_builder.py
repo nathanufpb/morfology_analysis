@@ -54,6 +54,8 @@ class MorphologicalMatrix:
         """Return the matrix as a NumPy integer array.
 
         Polymorphic states are collapsed to the *first* state.
+        **Note**: numeric character values are truncated to int; use
+        :meth:`to_numpy_float` to preserve them.
 
         Args:
             missing_value: Integer sentinel for missing data. Default ``-1``.
@@ -65,6 +67,23 @@ class MorphologicalMatrix:
         # Replace NaN with missing_value
         result = np.where(np.isnan(arr.astype(float)), missing_value, arr)
         return result.astype(int)
+
+    def to_numpy_float(self, missing_value: float = float("nan")) -> np.ndarray:
+        """Return the matrix as a NumPy float64 array.
+
+        Unlike :meth:`to_numpy`, this method preserves decimal values for
+        numeric (continuous) characters.
+
+        Args:
+            missing_value: Sentinel for missing data (default ``nan``).
+
+        Returns:
+            2D float64 array of shape (n_taxa, n_chars).
+        """
+        arr = self.df.values.copy().astype(float)
+        if not np.isnan(missing_value):
+            arr = np.where(np.isnan(arr), missing_value, arr)
+        return arr
 
     def get_taxa_names(self) -> List[str]:
         """Return list of taxon names (row index)."""
@@ -138,14 +157,20 @@ class MatrixBuilder:
     def _resolve_score(self, score) -> Optional[float]:
         """Convert a raw score to a float suitable for the DataFrame.
 
+        For numeric (continuous) characters the float value is stored as-is.
+        For discrete characters the value is converted to a 0-based state index.
+
         Args:
-            score: int, list[int], or None.
+            score: int, float, list[int], or None.
 
         Returns:
             Float value or NaN for missing data.
         """
         if score is None:
             return float("nan")
+        # Float values come from NUMERIC characters — store directly.
+        if isinstance(score, float):
+            return score
         if isinstance(score, list):
             if not score:
                 return float("nan")

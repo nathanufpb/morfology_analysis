@@ -56,7 +56,8 @@ class DeltaReader:
         self.num_characters: int = 0
         self.num_taxa: int = 0
         self._char_index: Dict[int, Character] = {}
-        self._ordered_char_ids: set = set()  # populated by _read_specs
+        self._ordered_char_ids: set = set()   # populated by _read_specs
+        self._numeric_char_ids: set = set()    # populated by _read_specs
 
     # ------------------------------------------------------------------
     # Public API
@@ -117,6 +118,21 @@ class DeltaReader:
         return " ".join(text.split())
 
     @staticmethod
+    def _parse_numeric_ids(text: str) -> set:
+        """Return the set of character IDs marked as real/numeric (``RN``) in *text*."""
+        block_m = re.search(r"\*CHARACTER\s+TYPES\s*(.*?)(?=\*|\Z)", text, re.DOTALL | re.IGNORECASE)
+        if not block_m:
+            return set()
+        block = block_m.group(1)
+        numeric_ids: set = set()
+        for m in re.finditer(r"(?:RN)\s+([\d,/\s]+)", block, re.IGNORECASE):
+            for part in re.split(r"[,\s]+", m.group(1)):
+                part = part.strip()
+                if part.isdigit():
+                    numeric_ids.add(int(part))
+        return numeric_ids
+
+    @staticmethod
     def _parse_ordered_ids(text: str) -> set:
         """Extract character IDs marked as ordered from a *CHARACTER TYPES block.
 
@@ -166,6 +182,8 @@ class DeltaReader:
             self.num_taxa = int(m.group(1))
         # *CHARACTER TYPES OM/RU <ids>  — ordered multistate characters
         self._ordered_char_ids = self._parse_ordered_ids(text)
+        # *CHARACTER TYPES RN <ids>  — real/numeric characters
+        self._numeric_char_ids = self._parse_numeric_ids(text)
         logger.debug(
             "specs: num_characters=%d, num_taxa=%d, ordered=%s",
             self.num_characters,
@@ -224,11 +242,12 @@ class DeltaReader:
             if not char_name:
                 char_name = f"Character {char_id}"
 
-            char_type = (
-                CharacterType.ORDERED
-                if char_id in ordered_chars
-                else CharacterType.UNORDERED
-            )
+            if char_id in self._numeric_char_ids:
+                char_type = CharacterType.NUMERIC
+            elif char_id in ordered_chars:
+                char_type = CharacterType.ORDERED
+            else:
+                char_type = CharacterType.UNORDERED
             char = Character(char_id=char_id, name=char_name, char_type=char_type)
 
             # Parse states
@@ -241,6 +260,7 @@ class DeltaReader:
             # If only 2 states, mark as BINARY
             if char.num_states == 2 and char_type == CharacterType.UNORDERED:
                 char.char_type = CharacterType.BINARY
+            # Numeric chars may have no discrete states — that's normal.
 
             self.characters.append(char)
             self._char_index[char_id] = char
@@ -322,6 +342,7 @@ class DeltaReader:
           ``5,?``          missing data for character 5
           ``7,-``          inapplicable for character 7
           ``2,0-2``        states 0 through 2 (range; treated as polymorphic)
+          ``4,3.5``        numeric value 3.5 for character 4 (NUMERIC type)
 
         Args:
             taxon: Taxon object to populate.
@@ -329,31 +350,44 @@ class DeltaReader:
         """
         # Match patterns like  <char_id>,<value>
         pattern = re.compile(
-            r"(\d+),\s*"           # character id
-            r"([\d\.\-/\?U]+)"     # score value(s)
+            r"(\d+),\s*"               # character id
+            r"([\d\.\-/\?U]+)"         # score value(s)  — now also matches decimals
         )
         for m in pattern.finditer(scores_text):
             char_id = int(m.group(1))
             raw_val = m.group(2).strip()
-            value = self._decode_score(raw_val)
+            char = self._char_index.get(char_id)
+            is_numeric = (
+                char is not None and char.char_type == CharacterType.NUMERIC
+            )
+            value = self._decode_score(raw_val, numeric=is_numeric)
             taxon.set_score(char_id, value)
 
     @staticmethod
-    def _decode_score(raw: str) -> ScoreValue:
+    def _decode_score(raw: str, numeric: bool = False) -> ScoreValue:
         """Convert a raw DELTA score string to a Python value.
 
         Args:
             raw: Raw score string from DELTA file.
+            numeric: If True the character is a real/continuous character;
+                the value is returned as a ``float`` rather than an ``int``.
 
         Returns:
             ``None`` for missing/inapplicable data,
-            ``int`` for a single state,
+            ``float`` for numeric characters,
+            ``int`` for a single discrete state,
             ``list[int]`` for polymorphic states.
         """
         raw = raw.strip()
         # Missing / inapplicable
         if raw in ("?", "U", "-"):
             return None
+        # Numeric character: return the raw float value unchanged (no 1-based conversion)
+        if numeric:
+            try:
+                return float(raw)
+            except ValueError:
+                return None
         # Polymorphic: slash-separated  e.g.  0/1  or  1/2/3
         if "/" in raw:
             parts = [p.strip() for p in raw.split("/") if p.strip()]
@@ -372,4 +406,8 @@ class DeltaReader:
         # Single integer state (1-based in DELTA → 0-based internally)
         if raw.isdigit():
             return int(raw) - 1
-        return None
+        # Float value without explicit numeric flag  (e.g. "3.5") → treat as float
+        try:
+            return float(raw)
+        except ValueError:
+            return None

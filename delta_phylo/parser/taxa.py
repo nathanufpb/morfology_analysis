@@ -8,8 +8,8 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Union
 
 # Type alias for a single character score entry.
-# Values may be: int, list of ints (polymorphic), or None (missing).
-ScoreValue = Optional[Union[int, List[int]]]
+# Values may be: int, float (numeric), list of ints (polymorphic), or None (missing).
+ScoreValue = Optional[Union[int, float, List[int]]]
 
 
 @dataclass
