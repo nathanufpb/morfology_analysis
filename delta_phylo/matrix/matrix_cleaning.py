@@ -54,9 +54,14 @@ class MatrixCleaner:
         )
 
     def remove_autapomorphies(self) -> MorphologicalMatrix:
-        """Remove characters that are unique to a single taxon (autapomorphies).
+        """Remove characters that are autapomorphic (unique derived state in one taxon).
 
-        A character is an autamorphy if only one taxon has a derived state.
+        A character is classified as an autapomorphy when **every** derived state
+        (state index > 0) it possesses is observed in only a single taxon.  Such
+        characters contain no grouping information for cladistic analysis.
+
+        Characters that are constant (same state in all taxa, handled separately
+        by :meth:`remove_constant_characters`) are never removed here.
 
         Returns:
             New MorphologicalMatrix without autapomorphic characters.
@@ -65,10 +70,23 @@ class MatrixCleaner:
         keep_cols = []
         for col in df.columns:
             non_na = df[col].dropna()
+            if non_na.empty:
+                keep_cols.append(col)
+                continue
             value_counts = non_na.value_counts()
-            # Remove if any state occurs in only one taxon and >1 state exists
-            is_autamorphy = (value_counts < 2).any() and value_counts.nunique() > 0
-            if not is_autamorphy or len(value_counts) <= 1:
+            # Check whether any derived state (state index > 0) exists at all.
+            has_derived = any(state != 0 for state in value_counts.index)
+            if not has_derived:
+                # Constant at the ancestral state — not autapomorphic; keep it.
+                keep_cols.append(col)
+                continue
+            # Keep if at least one derived state is shared by ≥2 taxa (synapomorphy).
+            derived_shared = any(
+                int(count) >= 2
+                for state, count in value_counts.items()
+                if state != 0
+            )
+            if derived_shared:
                 keep_cols.append(col)
 
         removed = len(df.columns) - len(keep_cols)

@@ -145,27 +145,55 @@ class TestRemoveConstantCharacters:
 
 class TestRemoveAutapomorphies:
     def test_column_with_all_unique_states_removed(self, autamorphy_matrix):
-        """C3 has three different states, each in exactly one taxon."""
+        """C3 has three different states, each in exactly one taxon → autapomorphy."""
         result = MatrixCleaner(autamorphy_matrix).remove_autapomorphies()
-        # C3 (0,1,2 – each state unique) should be removed
         assert "C3" not in result.df.columns
 
-    def test_returns_dataframe(self, autamorphy_matrix):
+    def test_synapomorphy_column_kept(self, autamorphy_matrix):
+        """C2 has derived state 1 shared by TaxB and TaxC → synapomorphy, keep it."""
         result = MatrixCleaner(autamorphy_matrix).remove_autapomorphies()
-        assert isinstance(result.df, pd.DataFrame)
+        assert "C2" in result.df.columns
 
-    @pytest.mark.xfail(
-        reason="Issue #3: buggy autapomorphy logic removes synapomorphies too; "
-               "C1 (state 1 shared by 2 taxa) should be kept but isn't."
-    )
+    def test_autapomorphy_single_derived_taxon_removed(self):
+        """Character where exactly one taxon shows the derived state is autapomorphic."""
+        df = pd.DataFrame(
+            {"C1": [0.0, 0.0, 1.0]},
+            index=["TaxA", "TaxB", "TaxC"],
+        )
+        result = MatrixCleaner(_make_matrix(df)).remove_autapomorphies()
+        assert "C1" not in result.df.columns
+
+    def test_synapomorphy_shared_by_two_taxa_kept(self):
+        """Derived state shared by 2 taxa must not be removed."""
+        df = pd.DataFrame(
+            {"C1": [0.0, 1.0, 1.0]},
+            index=["TaxA", "TaxB", "TaxC"],
+        )
+        result = MatrixCleaner(_make_matrix(df)).remove_autapomorphies()
+        assert "C1" in result.df.columns
+
+    def test_constant_ancestral_column_not_removed(self):
+        """A constant column at state 0 has no derived states; must be preserved."""
+        df = pd.DataFrame(
+            {"C1": [0.0, 0.0, 0.0]},
+            index=["T1", "T2", "T3"],
+        )
+        result = MatrixCleaner(_make_matrix(df)).remove_autapomorphies()
+        assert "C1" in result.df.columns
+
     def test_does_not_remove_all_columns(self):
-        """A character shared by ≥2 taxa must not be classified as autapomorphy."""
+        """C1 (derived state shared by 2 taxa) must be kept; C2 is autapomorphic."""
         df = pd.DataFrame(
             {"C1": [0.0, 1.0, 1.0], "C2": [0.0, 1.0, 2.0]},
             index=["T1", "T2", "T3"],
         )
         result = MatrixCleaner(_make_matrix(df)).remove_autapomorphies()
         assert result.df.shape[1] >= 1
+        assert "C1" in result.df.columns
+
+    def test_returns_dataframe(self, autamorphy_matrix):
+        result = MatrixCleaner(autamorphy_matrix).remove_autapomorphies()
+        assert isinstance(result.df, pd.DataFrame)
 
 
 # ---------------------------------------------------------------------------
