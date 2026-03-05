@@ -85,12 +85,8 @@ class TestMkLikelihood:
         assert math.isfinite(ll_true)
         assert math.isfinite(ll_false)
 
-    @pytest.mark.xfail(
-        reason="Issue #4: mk_likelihood ignores tree topology; "
-               "expected to fail until Felsenstein pruning is implemented."
-    )
     def test_different_trees_get_different_scores(self, tree_a, tree_b, small_matrix):
-        """After issue #4 is fixed, different trees must receive different scores."""
+        """Different tree topologies must produce different Felsenstein log-likelihoods."""
         ll_a = mk_likelihood(tree_a, small_matrix)
         ll_b = mk_likelihood(tree_b, small_matrix)
         assert ll_a != ll_b
@@ -122,9 +118,6 @@ class TestLikelihoodAnalysis:
         with pytest.raises((ValueError, IndexError)):
             analysis.best_of([])
 
-    @pytest.mark.xfail(
-        reason="Issue #4: all trees score identically until topology is used."
-    )
     def test_best_of_selects_higher_scoring_tree(self, tree_a, tree_b, small_matrix):
         """After issue #4 is fixed, best_of must pick the truly best tree."""
         analysis = LikelihoodAnalysis(small_matrix)
