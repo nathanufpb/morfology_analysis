@@ -87,11 +87,13 @@ class MatrixBuilder:
         characters: Ordered list of Character objects.
         taxa: Ordered list of Taxon objects.
         polymorphic_strategy: How to handle polymorphic states.
-            - ``"first"``   – use the first (lowest) state.
-            - ``"missing"`` – treat polymorphic as missing data.
+            - ``"first"``    – use the first (lowest/minimum) state.
+            - ``"missing"``  – treat polymorphic as missing data.
+            - ``"majority"`` – use the most common state (mode); ties are
+              broken by taking the smallest tied state.
     """
 
-    _POLYMORPHIC_STRATEGIES = ("first", "missing")
+    _POLYMORPHIC_STRATEGIES = ("first", "missing", "majority")
 
     def __init__(
         self,
@@ -149,6 +151,14 @@ class MatrixBuilder:
                 return float("nan")
             if self.polymorphic_strategy == "first":
                 return float(min(score))
+            if self.polymorphic_strategy == "majority":
+                # Mode: most common state; ties broken by smallest state.
+                counts: Dict[int, int] = {}
+                for s in score:
+                    counts[s] = counts.get(s, 0) + 1
+                max_count = max(counts.values())
+                modal_states = sorted(k for k, v in counts.items() if v == max_count)
+                return float(modal_states[0])
             # "missing" strategy
             return float("nan")
         return float(score)

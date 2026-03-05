@@ -171,6 +171,77 @@ class TestMatrixBuilder:
         val = matrix.df.iloc[0, 0]
         assert pd.isna(val)
 
+    def test_polymorphic_majority_strategy_returns_mode(self) -> None:
+        """majority strategy: score list [1, 2, 2] → mode is 2 (0-based)."""
+        import tempfile
+
+        delta_chars = "#1. size/\n1. small/\n2. medium/\n3. large/\n"
+        delta_items = "#1. T1/\n1,1/\n"  # placeholder — we call _resolve_score directly
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp)
+            (p / "characters").write_text(delta_chars)
+            (p / "items").write_text(delta_items)
+            reader = DeltaReader(p)
+            reader.read()
+            builder = MatrixBuilder(
+                reader.characters, reader.taxa, polymorphic_strategy="majority"
+            )
+        # Directly test the private method with a list that has a clear mode.
+        result = builder._resolve_score([1, 2, 2])  # mode = 2
+        assert result == 2.0
+
+    def test_polymorphic_majority_tie_breaks_to_lowest(self) -> None:
+        """majority strategy: equal counts → pick smallest (lowest) state."""
+        import tempfile
+
+        delta_chars = "#1. colour/\n1. red/\n2. blue/\n"
+        delta_items = "#1. TaxonPoly/\n1,1/2/\n"  # states 1, 2 tied → lowest → DELTA 1 → 0-based 0
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp)
+            (p / "characters").write_text(delta_chars)
+            (p / "items").write_text(delta_items)
+            reader = DeltaReader(p)
+            reader.read()
+            builder = MatrixBuilder(
+                reader.characters, reader.taxa, polymorphic_strategy="majority"
+            )
+            matrix = builder.build()
+        val = matrix.df.iloc[0, 0]
+        assert val == 0.0  # DELTA state 1 → 0-based 0 (same as "first" for this case)
+
+    def test_polymorphic_majority_single_state_returned_directly(self) -> None:
+        """majority strategy with a single state list must return that state."""
+        import tempfile
+
+        delta_chars = "#1. size/\n1. small/\n2. large/\n"
+        delta_items = "#1. T1/\n1,1/\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp)
+            (p / "characters").write_text(delta_chars)
+            (p / "items").write_text(delta_items)
+            reader = DeltaReader(p)
+            reader.read()
+            builder = MatrixBuilder(
+                reader.characters, reader.taxa, polymorphic_strategy="majority"
+            )
+        result = builder._resolve_score([5])
+        assert result == 5.0
+
+    def test_polymorphic_invalid_strategy_raises(self) -> None:
+        """Providing an unknown strategy must raise ValueError."""
+        import tempfile
+
+        delta_chars = "#1. colour/\n1. red/\n2. blue/\n"
+        delta_items = "#1. TaxonA/\n1,1/\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp)
+            (p / "characters").write_text(delta_chars)
+            (p / "items").write_text(delta_items)
+            reader = DeltaReader(p)
+            reader.read()
+            with pytest.raises(ValueError, match="polymorphic_strategy"):
+                MatrixBuilder(reader.characters, reader.taxa, polymorphic_strategy="bogus")
+
 
 # ---------------------------------------------------------------------------
 # Tests: MatrixCleaner
